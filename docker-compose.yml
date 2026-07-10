@@ -1,0 +1,45 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/files:/app/data/files
+      - ./skills:/app/skills
+      - ./workflows:/app/workflows
+    depends_on:
+      - postgres
+      - qdrant
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: self_agent
+      POSTGRES_PASSWORD: self_agent_dev
+      POSTGRES_DB: self_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.10.1
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+
