@@ -1,0 +1,13 @@
+id: skill_pdf_master
+name: pdf-master
+display_name: PDF 处理
+description: 提取、合并、拆分 PDF，并预留 OCR 接口。
+category: tools
+version: "0.1.0"
+enabled: true
+triggers:
+  - pdf
+  - ocr
+  - 提取
+permission_level: write
+confirm_required: false

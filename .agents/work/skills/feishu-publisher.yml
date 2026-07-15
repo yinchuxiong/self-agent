@@ -1,0 +1,13 @@
+id: skill_feishu_publisher
+name: feishu-publisher
+display_name: 飞书发布
+description: 准备飞书消息、文档和交互卡片，发布动作默认需要确认。
+category: work
+version: "0.1.0"
+enabled: true
+triggers:
+  - 飞书
+  - 发送
+  - 发布
+permission_level: external_publish
+confirm_required: true

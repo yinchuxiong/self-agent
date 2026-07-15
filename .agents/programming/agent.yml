@@ -1,0 +1,11 @@
+id: agent_programming
+name: programming
+display_name: Programming Agent
+description: 处理代码、Git、仓库健康、代码审查和依赖相关任务。
+enabled: true
+default_model: deepseek-chat
+permission_level: execute
+equipped_skills:
+  - git-manager
+  - code-reviewer
+  - repo-doctor

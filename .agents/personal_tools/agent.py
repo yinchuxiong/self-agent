@@ -1,17 +1,18 @@
+"""Personal Tools Agent: handles file processing, format conversion, and data manipulation."""
+
 from collections.abc import AsyncIterator
 
 from self_agent.app.agents.base import AgentRunResult, AgentRunStep, BaseAgent
 from self_agent.app.core.models import SkillDefinition
 
 
-class SchedulerAgent(BaseAgent):
+class PersonalToolsAgent(BaseAgent):
     async def run(self, prompt: str, skills: list[SkillDefinition]) -> AsyncIterator[AgentRunStep]:
-        skill_names = [skill.name for skill in skills] or ["reminder"]
+        skill_names = [skill.name for skill in skills] or ["format-shifter"]
         answer = (
-            "我把这条请求路由给了 Scheduler Agent。\n\n"
+            "我把这条请求路由给了 Personal Tools Agent。\n\n"
             f"- 识别到的能力：{', '.join(skill_names)}\n"
-            "- 初版先登记任务模型和管理页，真正触发执行会接 APScheduler。\n"
-            "- 高风险定时任务不会静默执行，需要预授权或转待确认。"
+            "- 初版先完成工具注册、权限信息和界面测试入口。\n"
+            "- 后续会把 JSON、PDF、Excel、格式转换工具接到统一 ToolExecutor。"
         )
         yield AgentRunResult(agent=self.definition.name, answer=answer, activated_skills=skill_names)
-

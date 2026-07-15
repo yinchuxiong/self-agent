@@ -1,0 +1,13 @@
+id: skill_json_master
+name: json-master
+display_name: JSON 工具
+description: 格式化、校验、查询和比较 JSON 数据。
+category: tools
+version: "0.1.0"
+enabled: true
+triggers:
+  - json
+  - schema
+  - 格式化
+permission_level: write
+confirm_required: false

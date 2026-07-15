@@ -1,49 +1,61 @@
+# ── DEPRECATED ────────────────────────────────────────────────────────────
+# AgentRuntime has been replaced by the LangGraph orchestration graph.
+# The SSE streaming is now handled by:
+#   self_agent/app/graph/sse_adapter.py (stream_chat_with_langgraph)
+#   self_agent/app/graph/supervisor_graph.py (build_supervisor_graph)
+# This file is preserved for reference and test backward compatibility.
+# ───────────────────────────────────────────────────────────────────────────
+#
 # ── 标准库 ──────────────────────────────────────────────────────────────
-import asyncio  # 异步 I/O 支持，用于 async/await 和 sleep 模拟流式延迟
-from collections.abc import AsyncIterator  # 异步迭代器类型标注，定义 stream_chat 的返回类型
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from pathlib import Path
 
 # ── Agent 层：各类业务 Agent ───────────────────────────────────────────
-from self_agent.app.agents.base import AgentRunResult, BaseAgent  # AgentRunResult: 最终执行结果
-from self_agent.app.agents.personal_tools import PersonalToolsAgent  # 个人工具 Agent（日历、提醒等）
-from self_agent.app.agents.programming import ProgrammingAgent  # 编程 Agent（代码生成、调试等）
-from self_agent.app.agents.scheduler import SchedulerAgent  # 调度 Agent（定时任务管理）
-from self_agent.app.agents.supervisor import Supervisor  # 监督者：根据用户输入内容识别意图，路由到合适的 Agent
-from self_agent.app.agents.work import WorkAgent  # 通用工作 Agent（默认回退，处理未分类请求）
+from self_agent.app.agents.base import AgentRunResult, BaseAgent
+from self_agent.app.agents.supervisor import Supervisor
+
+# ── 配置 ────────────────────────────────────────────────────────────────
+from self_agent.app.core.config import get_settings
 
 # ── 核心数据模型 ───────────────────────────────────────────────────────
 from self_agent.app.core.models import (
-    CallLog,  # 调用日志条目：记录一次完整请求的元数据（耗时、token、状态等）
-    CallStatus,  # 调用状态枚举：success / failed
-    ChatEvent,  # SSE 事件：流式推送给前端的一条消息（含事件类型、trace_id、数据等）
-    ChatMessage,  # 聊天消息：存储在会话中的一条对话记录（用户或助手）
-    ChatRequest,  # 聊天请求：前端发来的输入（内容、入口点、指定 agent 等）
-    new_id,  # 工具函数：生成带前缀的唯一 ID（如 "trace_xxx"）
-    utc_now,  # 工具函数：获取当前 UTC 时间
+    CallLog,
+    CallStatus,
+    ChatEvent,
+    ChatMessage,
+    ChatRequest,
+    new_id,
+    utc_now,
 )
 
 # ── 工具执行器 ─────────────────────────────────────────────────────────
-from self_agent.app.tools.base import ToolExecutor  # 工具注册与安全执行
-from self_agent.app.tools.git_tools import register_git_tools  # 注册 git 工具到 executor
+from self_agent.app.tools.base import ToolExecutor
 
 # ── 可观测性与注册表 ──────────────────────────────────────────────────
-from self_agent.app.observability.call_logger import CallLogger  # 调用日志记录器：持久化 CallLog，支持统计查询
-from self_agent.app.registries.agent_registry import AgentRegistry  # Agent 注册表：管理所有已注册 Agent 的定义信息
-from self_agent.app.registries.skill_registry import SkillRegistry  # Skill 注册表：管理 Skill 定义，按 Agent + 内容匹配
+from self_agent.app.observability.call_logger import CallLogger
+from self_agent.app.registries.agent_loader import AgentLoader
+from self_agent.app.registries.agent_registry import AgentRegistry
+from self_agent.app.registries.skill_registry import SkillRegistry
 
 # ── 存储层 ─────────────────────────────────────────────────────────────
-from self_agent.app.runtime.store import InMemoryStore  # 内存存储：会话和消息的 CRUD（非持久化，重启丢失）
+from self_agent.app.runtime.store import InMemoryStore
+
+logger = logging.getLogger(__name__)
 
 
 class AgentRuntime:
     """Agent 运行时：协调一次请求的完整生命周期。
 
     职责（按调用顺序）：
-    1. 持久化用户消息（即使后续失败也能审计追溯）
-    2. 通过 Supervisor 识别意图，路由到对应的业务 Agent
-    3. 匹配并激活相关 Skill
-    4. 执行 Agent 并流式推送回答（SSE 事件）
-    5. 记录调用日志（CallLog）用于统计和排错
-    6. 异常时推送错误事件并记录失败日志
+    1. 解析会话级工作目录（支持对话中动态切换项目）
+    2. 持久化用户消息（即使后续失败也能审计追溯）
+    3. 通过 Supervisor 识别意图，路由到对应的业务 Agent
+    4. 匹配并激活相关 Skill
+    5. 执行 Agent 并流式推送回答（SSE 事件）
+    6. 记录调用日志（CallLog）用于统计和排错
+    7. 异常时推送错误事件并记录失败日志
     """
 
     def __init__(
@@ -53,35 +65,81 @@ class AgentRuntime:
         skill_registry: SkillRegistry,
         call_logger: CallLogger,
     ) -> None:
-        # 依赖注入：所有外部依赖通过构造函数传入，便于测试和替换
-        self.store = store  # 会话存储（消息持久化）
-        self.agent_registry = agent_registry  # Agent 定义注册表
-        self.skill_registry = skill_registry  # Skill 定义注册表
-        self.call_logger = call_logger  # 调用日志记录器
-        self.supervisor = Supervisor(agent_registry)  # 意图识别 + 路由决策
+        self.store = store
+        self.agent_registry = agent_registry
+        self.skill_registry = skill_registry
+        self.call_logger = call_logger
+        self.supervisor = Supervisor(agent_registry)
+        self._settings = get_settings()
 
-    def _agent(self, name: str) -> BaseAgent:
-        """根据 Agent 名称构建对应的业务 Agent 实例。
+        # AgentLoader for dynamic agent class & tool loading
+        self._loader = AgentLoader(
+            agents_dir=str(Path(self._settings.default_workspace_dir) / ".agents"),
+            workspace_dir=self._settings.default_workspace_dir,
+        )
 
-        这是一个工厂方法：根据 Supervisor 路由得到的名称，
-        返回具体的 Agent 实现（ProgrammingAgent / PersonalToolsAgent 等）。
-        未匹配到的名称默认使用 WorkAgent 作为通用回退。
-
-        ProgrammingAgent 会额外注入 ToolExecutor，使其具备真实的工具执行能力。
+    def _resolve_workspace(self, session_id: str, request: ChatRequest) -> str:
+        """解析当前请求的工作目录，优先级：
+        1. 请求中显式指定的 workspace_dir
+        2. 会话已有的 workspace_dir
+        3. 全局配置的 default_workspace_dir
         """
-        definition = self.agent_registry.get(name)  # 从注册表获取 Agent 定义
-        if name == "programming":
-            executor = ToolExecutor(
-                workspace_dir=definition.workspace_dir,
-                allowed_paths=definition.allowed_paths,
+        session = self.store.get_session(session_id)
+        if request.workspace_dir:
+            resolved = str(Path(request.workspace_dir).resolve())
+            session.workspace_dir = resolved
+            return resolved
+        if session.workspace_dir:
+            return session.workspace_dir
+        return self._settings.default_workspace_dir
+
+    def _agent(self, name: str, workspace_dir: str) -> BaseAgent:
+        """根据 Agent 名称动态构建业务 Agent 实例。
+
+        从 .agents/{name}/agent.py 动态加载 Agent 类，
+        从 .agents/{name}/tools/ 动态加载工具模块并注入 ToolExecutor。
+        """
+        definition = self.agent_registry.get(name)
+        wd = workspace_dir or definition.workspace_dir
+
+        # ── Dynamic agent class loading ──────────────────────────────
+        agent_class = self._loader.load_agent_class(name)
+        if agent_class is None:
+            raise RuntimeError(
+                f"Agent '{name}' not found: .agents/{name}/agent.py does not exist "
+                f"or does not export a BaseAgent subclass."
             )
-            register_git_tools(executor)
-            return ProgrammingAgent(definition, executor)
-        if name == "personal_tools":
-            return PersonalToolsAgent(definition)
-        if name == "scheduler":
-            return SchedulerAgent(definition)
-        return WorkAgent(definition)  # 默认回退：通用工作 Agent
+
+        logger.info("Loaded agent class for: %s", name)
+
+        # ── Build executor and load tools ────────────────────────────
+        executor = ToolExecutor(
+            workspace_dir=wd,
+            allowed_paths=[wd],
+        )
+        registered = self._loader.register_tools_from_dir(name, executor)
+
+        if registered:
+            logger.info("Loaded %d tool modules for agent %s: %s", len(registered), name, registered)
+            for tool_name in executor.tool_names():
+                spec = executor.get(tool_name)
+                if spec is not None:
+                    self.skill_registry.register_tool_metadata(
+                        name=spec.name,
+                        display_name=spec.display_name,
+                        description=spec.description,
+                        owner_skill=name,
+                        permission_level=spec.permission_level,
+                        timeout_seconds=spec.timeout_seconds,
+                        parameter_schema=spec.parameter_schema,
+                    )
+
+        # Try to instantiate with tool_executor first (ProgrammingAgent pattern),
+        # then fall back to plain definition-only init (simple agents)
+        try:
+            return agent_class(definition, executor)
+        except TypeError:
+            return agent_class(definition)
 
     async def stream_chat(
         self,
@@ -92,8 +150,8 @@ class AgentRuntime:
 
         这是 AgentRuntime 的核心方法，整个请求生命周期如下：
 
-        ┌─ 1. 初始化 ──────────────────────────────────────────┐
-        │  生成 trace_id（全链路追踪标识），记录开始时间          │
+        ┌─ 1. 初始化：解析工作目录 ────────────────────────────────┐
+        │  优先级：请求指定 > 会话已有 > 全局配置                      │
         ├─ 2. 存储用户消息 ─────────────────────────────────────┤
         │  先持久化用户输入，即使后续执行失败也能在历史中查到     │
         ├─ 3. 意图识别 (Supervisor) ────────────────────────────┤
@@ -115,41 +173,40 @@ class AgentRuntime:
 
         返回 AsyncIterator[ChatEvent]，前端通过 SSE 逐条消费。
         """
-        # ═══ 1. 初始化：生成追踪 ID 和开始时间 ═══
-        trace_id = new_id("trace")  # 全链路追踪标识，如 "trace_a1b2c3d4"
-        started_at = utc_now()  # UTC 时间戳，用于计算总耗时
+        # ═══ 1. 初始化 ═══
+        trace_id = new_id("trace")
+        started_at = utc_now()
+        workspace_dir = self._resolve_workspace(session_id, request)
 
-        # ═══ 2. 持久化用户消息（在一切执行之前） ═══
-        # 这样即使 Agent 执行失败，用户的问题也不会丢失，确保可审计
+        # ═══ 2. 持久化用户消息 ═══
         self.store.add_message(
             ChatMessage(
                 session_id=session_id,
-                role="user",  # 角色：用户
-                content=request.content,  # 用户输入的原始文本
-                trace_id=trace_id,  # 关联到本次 trace
+                role="user",
+                content=request.content,
+                trace_id=trace_id,
             )
         )
 
-        # ═══ 3. 通知前端：Supervisor 开始识别意图 ═══
+        # ═══ 3. Supervisor 开始识别意图 ═══
         yield ChatEvent(
-            event="supervisor_started",  # SSE 事件类型
+            event="supervisor_started",
             trace_id=trace_id,
             message="Supervisor 正在识别意图",
         )
-        await asyncio.sleep(0.05)  # 短暂延迟，确保前端有时间渲染过渡动画
+        await asyncio.sleep(0.05)
 
         try:
-            # ═══ 4. 路由：Supervisor 根据用户内容决定用哪个 Agent ═══
-            # request.agent_name 若用户显式指定了 Agent 则优先使用，否则由 AI 判断
+            # ═══ 4. 路由 ═══
             route_decision = await self.supervisor.route(request.content, request.agent_name)
             agent_name = route_decision.agent_name
 
-            # ═══ 5. 启用检查：被禁用的 Agent 拒绝执行 ═══
+            # ═══ 5. 启用检查 ═══
             definition = self.agent_registry.get(agent_name)
             if not definition.enabled:
                 raise RuntimeError(f"{definition.display_name} 当前已禁用")
 
-            # ═══ 6. 通知前端：Agent 已确定，开始执行 ═══
+            # ═══ 6. Agent 已确定 ═══
             agent_started_message = f"已路由到 {definition.display_name}"
             if route_decision.reason:
                 agent_started_message += f"：{route_decision.reason}"
@@ -171,8 +228,6 @@ class AgentRuntime:
             await asyncio.sleep(0.05)
 
             # ═══ 7. Skill 匹配与激活 ═══
-            # 根据 Agent 名称和用户输入内容，从注册表中匹配可用 Skill
-            # Skill 激活事件先于真实工具调用，给前端展示"即将使用哪些能力"
             skills = self.skill_registry.match_skills(agent_name, request.content)
             for skill in skills:
                 yield ChatEvent(
@@ -182,17 +237,15 @@ class AgentRuntime:
                     skill=skill.name,
                     message=f"激活 {skill.display_name}",
                 )
-                await asyncio.sleep(0.03)  # 每个 Skill 激活间隔，逐一展示
+                await asyncio.sleep(0.03)
 
             # ═══ 8. 执行 Agent ═══
-            # 新版 Agent.run() 是异步生成器：yield ChatEvent（工具进度）→ 最终 yield AgentRunResult
-            agent = self._agent(agent_name)
+            agent = self._agent(agent_name, workspace_dir)
             result: AgentRunResult | None = None
             async for step in agent.run(request.content, skills):
                 if isinstance(step, AgentRunResult):
                     result = step
                 elif isinstance(step, ChatEvent):
-                    # 透传中间事件（tool_started / tool_result 等）
                     yield step
                     await asyncio.sleep(0.01)
 
@@ -203,25 +256,23 @@ class AgentRuntime:
                 )
 
             # ═══ 9. 流式推送回答 ═══
-            # 将完整回答按固定长度分块，逐块以 answer_delta 事件发送
-            # 模拟流式输出的打字机效果（Agent 目前是同步返回完整结果的）
             for chunk in _chunk_text(result.answer, 42):
                 yield ChatEvent(
                     event="answer_delta",
                     trace_id=trace_id,
                     agent=agent_name,
                     message=chunk,
-                    data={"delta": chunk},  # data 字段携带增量文本，前端可直接追加渲染
+                    data={"delta": chunk},
                 )
-                await asyncio.sleep(0.02)  # 块间延迟，控制打字速度
+                await asyncio.sleep(0.02)
 
             # ═══ 10. 持久化助手消息 ═══
             self.store.add_message(
                 ChatMessage(
                     session_id=session_id,
-                    role="assistant",  # 角色：助手
-                    content=result.answer,  # Agent 返回的完整回答
-                    agent_name=agent_name,  # 记录是哪个 Agent 回答的
+                    role="assistant",
+                    content=result.answer,
+                    agent_name=agent_name,
                     trace_id=trace_id,
                 )
             )
@@ -232,24 +283,21 @@ class AgentRuntime:
                 CallLog(
                     trace_id=trace_id,
                     session_id=session_id,
-                    entrypoint=request.entrypoint,  # 入口来源（如 web / cli / api）
+                    entrypoint=request.entrypoint,
                     agent_name=agent_name,
-                    # 将激活的 Skill 名称用逗号拼接成一个字符串
                     skill_name=",".join(result.activated_skills) or None,
-                    status=CallStatus.success,  # 标记为成功
+                    status=CallStatus.success,
                     started_at=started_at,
                     finished_at=finished_at,
-                    latency_ms=CallLogger.latency_ms(started_at, finished_at),  # 总耗时（毫秒）
-                    input_summary=request.content[:120],  # 输入摘要（截取前 120 字符）
-                    output_summary=result.answer[:160],  # 输出摘要（截取前 160 字符）
-                    # token 数估算：简单按字符数 / 4 近似（后续可接入真实 tokenizer）
+                    latency_ms=CallLogger.latency_ms(started_at, finished_at),
+                    input_summary=request.content[:120],
+                    output_summary=result.answer[:160],
                     input_tokens=max(1, len(request.content) // 4),
                     output_tokens=max(1, len(result.answer) // 4),
                 )
             )
 
             # ═══ 12. 推送最终事件 ═══
-            # final 事件标志本次请求结束，携带完整回答和 Skill 列表供前端做最终渲染
             yield ChatEvent(
                 event="final",
                 trace_id=trace_id,
@@ -262,44 +310,26 @@ class AgentRuntime:
             )
 
         except Exception as exc:
-            # ═══ 异常路径：记录失败日志并推送错误事件 ═══
+            # ═══ 异常路径 ═══
             finished_at = utc_now()
             self.call_logger.add(
                 CallLog(
                     trace_id=trace_id,
                     session_id=session_id,
                     entrypoint=request.entrypoint,
-                    status=CallStatus.failed,  # 标记为失败
+                    status=CallStatus.failed,
                     started_at=started_at,
                     finished_at=finished_at,
                     latency_ms=CallLogger.latency_ms(started_at, finished_at),
                     input_summary=request.content[:120],
-                    output_summary="",  # 失败时无输出
-                    error_type=type(exc).__name__,  # 异常类型（如 RuntimeError）
-                    error_message=str(exc),  # 异常消息
+                    output_summary="",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
                 )
             )
-            # 推送 error 事件给前端，前端可据此展示错误提示
             yield ChatEvent(event="error", trace_id=trace_id, message=str(exc))
 
 
 def _chunk_text(text: str, size: int) -> list[str]:
-    """将文本按固定长度切块，用于模拟流式输出的打字机效果。
-
-    Args:
-        text: 要切分的完整文本（Agent 返回的完整回答）
-        size: 每块的字符数（默认 42 个字符，约一行终端宽度的一半）
-
-    Returns:
-        字符串列表，每个元素是原文本的一个切片
-
-    Example:
-        >>> _chunk_text("你好世界", 2)
-        ['你好', '世界']
-        >>> _chunk_text("abc", 5)
-        ['abc']  # 比 size 短时直接返回单元素列表
-
-    注意：这是纯字符切分，不考虑中英文边界，可能在多字节字符中间切断。
-    生产环境中应使用更智能的分块策略（按词边界、按标点等）。
-    """
+    """将文本按固定长度切块，用于模拟流式输出的打字机效果。"""
     return [text[index : index + size] for index in range(0, len(text), size)]

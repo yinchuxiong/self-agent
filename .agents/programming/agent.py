@@ -1,9 +1,7 @@
 """Programming Agent: LLM + Tool Calling loop for code, Git, and repository tasks.
 
-This is the first domain agent with real tool execution capability.
-It uses the OpenAI-compatible tool_calling API to let the LLM decide when
-to call git tools, executes them in a sandboxed workspace, and streams
-progress back to the frontend via SSE events.
+This agent lives under .agents/programming/ — its tools are in ./tools/,
+skills in ./skills/, and MCP config in ../mcp.yml.
 """
 
 import asyncio
@@ -21,54 +19,52 @@ from self_agent.app.tools.base import ToolExecutor
 
 logger = logging.getLogger(__name__)
 
-# ── Maximum iterations for the tool-calling loop ──────────────────────────
 MAX_TOOL_ITERATIONS = 5
-
-# ── System prompt template ────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
 你是 Programming Agent，一个专注于编程和代码仓库管理的 AI 助手。
 
 ## 你的职责
-- 帮助用户查看和管理 Git 仓库
-- 分析代码变更（diff）
-- 查看提交历史
-- 审查代码质量
+- 帮助用户查看和管理 Git 仓库（状态、差异、日志、分支、标签等）
+- 分析代码变更（diff）、审查代码质量
+- 运行 Python/Node 脚本、管理依赖（pip/npm/poetry）
+- 浏览项目文件（ls/cat/grep/find）
+
+## 核心工具：execute_command
+你有一个核心工具 `execute_command`，用于在工作目录中执行 shell 命令。
+这个工具自带沙箱保护——危险命令（rm -rf、sudo、git push -f 等）会被自动拦截。
 
 ## 工具使用规则
-1. **主动使用工具**：当用户的问题涉及仓库状态、代码差异、提交历史时，主动调用相应的工具获取最新数据。
-2. **一次一个工具**：每次只调用一个工具，等待结果后再决定下一步。
-3. **结果解读**：获取工具结果后，用清晰的中文向用户解释结果的含义，不要直接粘贴原始输出。
-4. **空结果处理**：如果工具返回空结果，如实告知用户（如"工作区是干净的，没有未提交的改动"）。
-5. **错误处理**：如果工具执行失败，告诉用户失败原因并给出建议（如"当前目录不是 Git 仓库，是否需要初始化？"）。
+1. **用你的 CLI 知识构造命令**：你精通 git 和各种 CLI 工具，直接写出你需要的确切命令。
+   - 查看状态 → `git status --short -b`
+   - 查看差异 → `git diff` 或 `git diff --staged` 或 `git diff -- <file>`
+   - 查看日志 → `git log --oneline -n20` 或 `git log --oneline --author=xxx`
+   - 查看某次提交 → `git show <commit>`
+   - 列出分支 → `git branch -a`
+   - 包管理 → `pip list` / `npm list` / `poetry show`
+2. **一次一个命令**：每次只调用一个工具，等待结果后再决定下一步。
+3. **结果解读**：获取命令输出后，用清晰的中文向用户解释结果的含义，不要直接粘贴原始输出。
+4. **空结果处理**：如果命令返回空，如实告知用户（如"工作区是干净的，没有未提交的改动"）。
+5. **错误处理**：如果命令执行失败，告诉用户失败原因并给出建议。
 
 ## 当前工作目录
 {workspace_dir}
 
 ## 重要提示
-- 你只能使用提供的工具，不能执行其他操作。
-- 对于只读操作（查看状态、差异、历史），直接执行并返回结果。
-- 对于写入操作（提交、推送等），必须提示用户这个版本暂不支持。
+- 所有命令在沙箱中执行，只能操作当前工作目录内的文件。
+- 对于只读操作，直接执行并返回结果。
+- 对于写入操作（提交、推送等），提示用户当前版本暂不支持。
 """
 
-# ── Maximum tokens allowed for tool result content ─────────────────────────
-MAX_TOOL_OUTPUT_TOKENS_ESTIMATE = 6000  # ~24K chars at 4 chars/token
+MAX_TOOL_OUTPUT_TOKENS_ESTIMATE = 6000
 
 
 class ProgrammingAgent(BaseAgent):
-    """Autonomous programming agent with LLM-driven tool calling.
-
-    The agent:
-    1. Receives user prompt + activated skills
-    2. Loads corresponding tools into a ToolExecutor
-    3. Enters a tool-calling loop with the DeepSeek API
-    4. Streams tool progress as ChatEvent yields
-    5. Returns the final LLM answer as AgentRunResult
-    """
+    """Autonomous programming agent with LLM-driven tool calling."""
 
     def __init__(
         self,
-        definition: Any,  # AgentDefinition
+        definition: Any,
         tool_executor: ToolExecutor,
         settings: Settings | None = None,
     ) -> None:
@@ -76,16 +72,12 @@ class ProgrammingAgent(BaseAgent):
         self.executor = tool_executor
         self.settings = settings or get_settings()
 
-    # ── Main entry point ──────────────────────────────────────────────────
-
     async def run(
         self, prompt: str, skills: list[SkillDefinition]
     ) -> AsyncIterator[AgentRunStep]:
-        """Execute the agent loop, yielding progress events and final result."""
         skill_names = [skill.name for skill in skills]
         trace_id = f"agent_programming_{id(prompt)}"
 
-        # ── Build messages ────────────────────────────────────────────────
         system_content = SYSTEM_PROMPT.format(
             workspace_dir=self.definition.workspace_dir
         )
@@ -107,29 +99,20 @@ class ProgrammingAgent(BaseAgent):
         answer = ""
         activated_tools: list[str] = []
 
-        # ── Tool calling loop ─────────────────────────────────────────────
         for iteration in range(MAX_TOOL_ITERATIONS):
             response = await self._call_llm(messages, tool_definitions)
-
             choice = response.get("choices", [{}])[0]
             message = choice.get("message", {})
-
-            # Check for tool_calls in the response
             tool_calls = message.get("tool_calls") or []
 
             if tool_calls:
-                # ── Execute tool(s) ───────────────────────────────────────
-                # Append the assistant's tool_call message to history
                 messages.append(message)
-
                 for tc in tool_calls:
                     func = tc.get("function", {})
                     tool_name = func.get("name", "")
                     arguments = self._parse_tool_args(func.get("arguments", "{}"))
-
                     activated_tools.append(tool_name)
 
-                    # Yield tool_started event
                     yield ChatEvent(
                         event="tool_started",
                         trace_id=trace_id,
@@ -139,10 +122,8 @@ class ProgrammingAgent(BaseAgent):
                     )
                     await asyncio.sleep(0.02)
 
-                    # Execute the tool
                     result = await self.executor.execute(tool_name, arguments)
 
-                    # Yield tool_result event
                     output_summary = (
                         result.output[:200] + "..."
                         if len(result.output) > 200
@@ -166,41 +147,31 @@ class ProgrammingAgent(BaseAgent):
                     )
                     await asyncio.sleep(0.02)
 
-                    # Append tool result to conversation
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id", ""),
                         "content": result.output if result.success else f"Error: {result.error}",
                     })
-
-                # Continue the loop — LLM will process tool results
                 continue
 
-            # ── No tool calls → this is the final answer ──────────────────
             answer = message.get("content") or choice.get("text") or ""
             if not answer:
                 answer = "(LLM returned empty response)"
             break
-
         else:
-            # Loop exhausted without a final answer
             answer = "已达到最大工具调用次数，但任务可能未完成。请尝试更具体的提问。"
 
-        # ── Return final result ───────────────────────────────────────────
         yield AgentRunResult(
             agent=self.definition.name,
             answer=answer,
             activated_skills=skill_names + activated_tools,
         )
 
-    # ── LLM integration ───────────────────────────────────────────────────
-
     async def _call_llm(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        """Send messages to DeepSeek API with tool definitions, return parsed JSON."""
         url = self.settings.deepseek_base_url.rstrip("/") + "/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.settings.deepseek_api_key}",
@@ -219,12 +190,8 @@ class ProgrammingAgent(BaseAgent):
         return await asyncio.to_thread(self._post_completion, url, headers, payload)
 
     def _post_completion(
-        self,
-        url: str,
-        headers: dict[str, str],
-        payload: dict[str, Any],
+        self, url: str, headers: dict[str, str], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        """Synchronous HTTP POST for LLM API call (runs in thread pool)."""
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(url, data=data, headers=headers, method="POST")
         try:
@@ -238,11 +205,8 @@ class ProgrammingAgent(BaseAgent):
             logger.error("DeepSeek API connection error: %s", exc.reason)
             raise
 
-    # ── Helpers ───────────────────────────────────────────────────────────
-
     @staticmethod
     def _parse_tool_args(raw: str | dict[str, Any]) -> dict[str, Any]:
-        """Parse tool arguments from string or dict into a dict."""
         if isinstance(raw, dict):
             return raw
         try:

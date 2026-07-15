@@ -1,0 +1,11 @@
+id: agent_work
+name: work
+display_name: Work Agent
+description: 处理日报、会议纪要、任务追踪和飞书发布前的内容准备。
+enabled: true
+default_model: deepseek-chat
+permission_level: external_publish
+equipped_skills:
+  - daily-reporter
+  - task-tracker
+  - feishu-publisher

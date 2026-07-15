@@ -8,7 +8,16 @@ dependencies = [
   "pydantic>=2.7.0",
   "pydantic-settings>=2.2.1",
   "python-dotenv>=1.0.1",
+  "pyyaml>=6.0",
   "uvicorn[standard]>=0.30.0",
+  # LangChain + LangGraph (Agent orchestration)
+  "langchain>=0.3.0",
+  "langchain-core>=0.3.0",
+  "langchain-openai>=0.2.0",
+  "langgraph>=0.2.50",
+  "langgraph-checkpoint-sqlite>=2.0.0",
+  # LangSmith (observability)
+  "langsmith>=0.2.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,15 @@
+id: skill_git_manager
+name: git-manager
+display_name: Git 管理
+description: 读取仓库状态、分支、提交历史和差异，为后续执行做准备。
+category: programming
+version: "0.1.0"
+enabled: true
+triggers:
+  - git
+  - 提交
+  - 分支
+  - diff
+  - commit
+permission_level: execute
+confirm_required: true

@@ -16,8 +16,8 @@ class InMemoryStore:
         self._sessions: dict[str, ChatSession] = {}
         self._messages: dict[str, list[ChatMessage]] = {}
 
-    def create_session(self, title: str | None = None) -> ChatSession:
-        session = ChatSession(title=title or "新会话")
+    def create_session(self, title: str | None = None, workspace_dir: str = "") -> ChatSession:
+        session = ChatSession(title=title or "新会话", workspace_dir=workspace_dir)
         self._sessions[session.id] = session
         self._messages[session.id] = []
         return session
@@ -69,6 +69,7 @@ class SQLiteStore:
             CREATE TABLE IF NOT EXISTS chat_sessions (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
+                workspace_dir TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -89,19 +90,28 @@ class SQLiteStore:
                 ON chat_sessions(updated_at);
             """
         )
+        # M2 migration: add workspace_dir column if upgrading from M1 schema
+        try:
+            self._conn.execute(
+                "ALTER TABLE chat_sessions ADD COLUMN workspace_dir TEXT NOT NULL DEFAULT ''"
+            )
+            self._conn.commit()
+        except Exception:
+            pass  # column already exists
         self._conn.commit()
 
-    def create_session(self, title: str | None = None) -> ChatSession:
-        session = ChatSession(title=title or "新会话")
+    def create_session(self, title: str | None = None, workspace_dir: str = "") -> ChatSession:
+        session = ChatSession(title=title or "新会话", workspace_dir=workspace_dir)
         with self._lock:
             self._conn.execute(
                 """
-                INSERT INTO chat_sessions (id, title, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO chat_sessions (id, title, workspace_dir, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     session.id,
                     session.title,
+                    session.workspace_dir,
                     _dump_datetime(session.created_at),
                     _dump_datetime(session.updated_at),
                 ),
@@ -113,7 +123,7 @@ class SQLiteStore:
         with self._lock:
             rows = self._conn.execute(
                 """
-                SELECT id, title, created_at, updated_at
+                SELECT id, title, workspace_dir, created_at, updated_at
                 FROM chat_sessions
                 ORDER BY updated_at DESC
                 """
@@ -124,7 +134,7 @@ class SQLiteStore:
         with self._lock:
             row = self._conn.execute(
                 """
-                SELECT id, title, created_at, updated_at
+                SELECT id, title, workspace_dir, created_at, updated_at
                 FROM chat_sessions
                 WHERE id = ?
                 """,
@@ -143,7 +153,7 @@ class SQLiteStore:
         with self._lock:
             session = self._conn.execute(
                 """
-                SELECT id, title, created_at, updated_at
+                SELECT id, title, workspace_dir, created_at, updated_at
                 FROM chat_sessions
                 WHERE id = ?
                 """,
@@ -216,6 +226,7 @@ def _session_from_row(row: sqlite3.Row) -> ChatSession:
     return ChatSession(
         id=row["id"],
         title=row["title"],
+        workspace_dir=row["workspace_dir"] if "workspace_dir" in row.keys() else "",
         created_at=_parse_datetime(row["created_at"]),
         updated_at=_parse_datetime(row["updated_at"]),
     )

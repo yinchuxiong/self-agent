@@ -1,0 +1,13 @@
+id: skill_schedule_auditor
+name: schedule-auditor
+display_name: 任务审计
+description: 审查和清理过期、冲突或重复的定时任务。
+category: scheduled
+version: "0.1.0"
+enabled: true
+triggers:
+  - 审计
+  - 清理
+  - 检查任务
+permission_level: read
+confirm_required: false

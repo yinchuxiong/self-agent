@@ -42,6 +42,7 @@ export interface ToolDefinition {
 export interface ChatSession {
   id: string;
   title: string;
+  workspace_dir: string;
   created_at: string;
   updated_at: string;
 }

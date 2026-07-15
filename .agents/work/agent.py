@@ -1,3 +1,5 @@
+"""Work Agent: handles daily reports, meeting notes, task tracking, and Feishu publishing."""
+
 from collections.abc import AsyncIterator
 
 from self_agent.app.agents.base import AgentRunResult, AgentRunStep, BaseAgent
@@ -14,4 +16,3 @@ class WorkAgent(BaseAgent):
             "- 飞书发布属于外部影响操作，后续会默认走预览确认。"
         )
         yield AgentRunResult(agent=self.definition.name, answer=answer, activated_skills=skill_names)
-

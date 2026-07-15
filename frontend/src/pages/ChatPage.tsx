@@ -1,4 +1,4 @@
-import { PlusOutlined, SendOutlined } from "@ant-design/icons";
+import { FolderOpenOutlined, PlusOutlined, SendOutlined } from "@ant-design/icons";
 import { Button, Empty, Input, List, Select, Space, Spin, Typography, message } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { api, streamMessage } from "../api/client";
@@ -18,6 +18,7 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [agents, setAgents] = useState<AgentDefinition[]>([]);
   const [agentName, setAgentName] = useState("auto");
+  const [workspaceDir, setWorkspaceDir] = useState("");
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +39,7 @@ export default function ChatPage() {
   }
 
   async function createSession() {
-    const session = await api.createSession();
+    const session = await api.createSession(workspaceDir);
     setSessions((current) => [session, ...current]);
     setActiveSession(session.id);
     setMessages([]);
@@ -48,6 +49,8 @@ export default function ChatPage() {
     const detail = await api.session(sessionId);
     setActiveSession(sessionId);
     setMessages(detail.messages.map(toUiMessage));
+    // 同步当前工作目录到输入框
+    setWorkspaceDir(detail.session.workspace_dir ?? "");
   }
 
   async function send() {
@@ -62,7 +65,7 @@ export default function ChatPage() {
     ]);
 
     try {
-      await streamMessage(activeSession, content, agentName, (event) => {
+      await streamMessage(activeSession, content, agentName, workspaceDir, (event) => {
         // Answer chunks append into the latest assistant bubble.
         if (event.event === "answer_delta") {
           setMessages((current) => {
@@ -119,14 +122,31 @@ export default function ChatPage() {
               className={session.id === activeSession ? "sessionItem active" : "sessionItem"}
               onClick={() => void openSession(session.id)}
             >
-              <Typography.Text ellipsis>{session.title}</Typography.Text>
+              <div>
+                <Typography.Text ellipsis>{session.title}</Typography.Text>
+                {session.workspace_dir ? (
+                  <Typography.Text type="secondary" style={{ display: "block", fontSize: 11 }}>
+                    {session.workspace_dir}
+                  </Typography.Text>
+                ) : null}
+              </div>
             </List.Item>
           )}
         />
       </aside>
       <main className="chatPane">
         <div className="chatToolbar">
-          <Select value={agentName} options={agentOptions} onChange={setAgentName} />
+          <Space>
+            <Select value={agentName} options={agentOptions} onChange={setAgentName} />
+            <Input
+              prefix={<FolderOpenOutlined />}
+              placeholder="工作目录，如 E:/my-project"
+              value={workspaceDir}
+              onChange={(event) => setWorkspaceDir(event.target.value)}
+              style={{ width: 240 }}
+              allowClear
+            />
+          </Space>
           <Typography.Text type="secondary">SSE 流式事件已接入</Typography.Text>
         </div>
         <div className="messageStack">

@@ -1,0 +1,14 @@
+id: skill_code_reviewer
+name: code-reviewer
+display_name: 代码审查
+description: 对代码差异做风险分级审查，输出问题、证据和修复建议。
+category: programming
+version: "0.1.0"
+enabled: true
+triggers:
+  - review
+  - 审查
+  - 代码检查
+  - bug
+permission_level: read
+confirm_required: false

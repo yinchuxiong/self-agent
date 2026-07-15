@@ -1,0 +1,11 @@
+id: agent_personal_tools
+name: personal_tools
+display_name: Personal Tools Agent
+description: 处理文件、PDF、Excel、JSON、文本转换和轻量数据加工。
+enabled: true
+default_model: deepseek-chat
+permission_level: write
+equipped_skills:
+  - json-master
+  - format-shifter
+  - pdf-master

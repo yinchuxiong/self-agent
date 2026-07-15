@@ -5,12 +5,23 @@ services:
       dockerfile: docker/Dockerfile.api
     env_file:
       - .env
+    environment:
+      # LangSmith observability (forward from .env)
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-self-agent}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-true}
+      - LANGCHAIN_ENDPOINT=${LANGCHAIN_ENDPOINT:-https://api.smith.langchain.com}
+      # Checkpointer backend (sqlite by default, postgres for production)
+      - CHECKPOINT_BACKEND=${CHECKPOINT_BACKEND:-sqlite}
     ports:
       - "8000:8000"
     volumes:
       - ./data/files:/app/data/files
+      - ./data/checkpoints:/app/data/checkpoints
       - ./skills:/app/skills
       - ./workflows:/app/workflows
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
     depends_on:
       - postgres
       - qdrant

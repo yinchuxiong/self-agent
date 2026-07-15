@@ -1,0 +1,14 @@
+id: skill_task_tracker
+name: task-tracker
+display_name: 任务追踪
+description: 追踪任务状态、生成进度报告和待办清单。
+category: work
+version: "0.1.0"
+enabled: true
+triggers:
+  - 任务
+  - 进度
+  - 待办
+  - todo
+permission_level: read
+confirm_required: false

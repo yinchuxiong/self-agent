@@ -1,0 +1,13 @@
+id: skill_reminder
+name: reminder
+display_name: 提醒
+description: 创建一次性提醒，后续接入 APScheduler 持久化执行。
+category: scheduled
+version: "0.1.0"
+enabled: true
+triggers:
+  - 提醒
+  - 定时
+  - 稍后
+permission_level: write
+confirm_required: false

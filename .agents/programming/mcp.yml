@@ -1,0 +1,12 @@
+# MCP server configurations for Programming Agent
+# Each entry defines a Model Context Protocol server this agent can connect to.
+#
+# Example:
+# servers:
+#   - name: github
+#     command: npx
+#     args: ["-y", "@modelcontextprotocol/server-github"]
+#     env:
+#       GITHUB_TOKEN: ${GITHUB_TOKEN}
+
+servers: []

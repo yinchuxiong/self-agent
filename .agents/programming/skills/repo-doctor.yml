@@ -1,0 +1,14 @@
+id: skill_repo_doctor
+name: repo-doctor
+display_name: 仓库体检
+description: 检查依赖、仓库结构、忽略规则和潜在维护风险。
+category: programming
+version: "0.1.0"
+enabled: true
+triggers:
+  - 仓库
+  - 依赖
+  - 健康
+  - 体检
+permission_level: read
+confirm_required: false

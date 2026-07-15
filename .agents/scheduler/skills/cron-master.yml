@@ -1,0 +1,14 @@
+id: skill_cron_master
+name: cron-master
+display_name: 定时任务管理
+description: 创建和管理 cron 风格的定时任务。
+category: scheduled
+version: "0.1.0"
+enabled: true
+triggers:
+  - cron
+  - 定时任务
+  - 周期
+  - 每天
+permission_level: write
+confirm_required: false

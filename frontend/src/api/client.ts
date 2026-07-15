@@ -39,7 +39,11 @@ export const api = {
   workflows: () => request<Record<string, unknown>[]>("/workflows"),
   documents: () => request<Record<string, unknown>[]>("/knowledge/documents"),
   settings: () => request<Record<string, unknown>>("/settings"),
-  createSession: () => request<ChatSession>("/chat/sessions", { method: "POST" }),
+  createSession: (workspaceDir?: string) =>
+    request<ChatSession>("/chat/sessions", {
+      method: "POST",
+      body: JSON.stringify({ workspace_dir: workspaceDir ?? "" })
+    }),
   sessions: () => request<ChatSession[]>("/chat/sessions"),
   session: (id: string) =>
     request<{ session: ChatSession; messages: ChatMessage[] }>(`/chat/sessions/${id}`),
@@ -53,13 +57,14 @@ export async function streamMessage(
   sessionId: string,
   content: string,
   agentName: string,
+  workspaceDir: string,
   onEvent: (event: ChatEvent) => void
 ): Promise<void> {
   // Fetch streaming works with POST, unlike EventSource, and carries the selected Agent.
   const response = await fetch(`${API_BASE}/chat/sessions/${sessionId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content, agent_name: agentName, entrypoint: "web_ui" })
+    body: JSON.stringify({ content, agent_name: agentName, workspace_dir: workspaceDir, entrypoint: "web_ui" })
   });
   if (!response.ok || !response.body) {
     throw new Error(await response.text());

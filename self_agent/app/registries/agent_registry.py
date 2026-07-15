@@ -1,74 +1,54 @@
+"""Agent registry: scans .agents/ directory for agent definitions.
+
+The registry discovers agents from the filesystem. Each agent lives in its own
+directory under .agents/{name}/ with an agent.yml config file.
+
+Supervisor is always available as a built-in agent (it's infrastructure, not a
+domain agent directory).
+"""
+
 from collections.abc import Iterable
+from pathlib import Path
 
 from self_agent.app.core.models import AgentDefinition, PermissionLevel
+from self_agent.app.registries.agent_loader import AgentLoader
 
 
 class AgentRegistry:
-    """In-memory Agent registry for M1.
+    """Filesystem-driven Agent registry.
 
-    The API shape mirrors the future database-backed registry so persistence can replace
-    this class without changing callers.
+    Scans .agents/*/agent.yml at startup. Supervisor is injected as a built-in
+    since it's framework infrastructure rather than a domain agent.
     """
 
-    def __init__(self, workspace_dir: str) -> None:
+    def __init__(self, workspace_dir: str, agents_dir: str | None = None) -> None:
         self._agents: dict[str, AgentDefinition] = {}
-        self._seed(workspace_dir)
+        self._loader = AgentLoader(
+            agents_dir=agents_dir or str(Path(workspace_dir) / ".agents"),
+            workspace_dir=workspace_dir,
+        )
+        self._seed()
 
-    def _seed(self, workspace_dir: str) -> None:
-        # Built-in agents from the technical plan. They give the UI useful data immediately.
-        agents = [
-            AgentDefinition(
+    def _seed(self) -> None:
+        """Load agents from .agents/ directory, then add built-in supervisor."""
+        # Load domain agents from the filesystem
+        for definition in self._loader.load_agent_definitions():
+            self._agents[definition.name] = definition
+
+        # Always add supervisor as a built-in (it routes to domain agents)
+        if "supervisor" not in self._agents:
+            self._agents["supervisor"] = AgentDefinition(
                 id="agent_supervisor",
                 name="supervisor",
                 display_name="Supervisor Agent",
                 description="负责意图识别、任务路由和结果聚合。",
-                workspace_dir=workspace_dir,
-                allowed_paths=[workspace_dir],
+                workspace_dir=self._loader.workspace_dir,
+                allowed_paths=[self._loader.workspace_dir],
                 permission_level=PermissionLevel.read,
                 equipped_skills=[],
-            ),
-            AgentDefinition(
-                id="agent_programming",
-                name="programming",
-                display_name="Programming Agent",
-                description="处理代码、Git、仓库健康、代码审查和依赖相关任务。",
-                workspace_dir=workspace_dir,
-                allowed_paths=[workspace_dir],
-                permission_level=PermissionLevel.execute,
-                equipped_skills=["git-manager", "code-reviewer", "repo-doctor"],
-            ),
-            AgentDefinition(
-                id="agent_personal_tools",
-                name="personal_tools",
-                display_name="Personal Tools Agent",
-                description="处理文件、PDF、Excel、JSON、文本转换和轻量数据加工。",
-                workspace_dir=workspace_dir,
-                allowed_paths=[workspace_dir],
-                permission_level=PermissionLevel.write,
-                equipped_skills=["json-master", "format-shifter", "pdf-master"],
-            ),
-            AgentDefinition(
-                id="agent_work",
-                name="work",
-                display_name="Work Agent",
-                description="处理日报、会议纪要、任务追踪和飞书发布前的内容准备。",
-                workspace_dir=workspace_dir,
-                allowed_paths=[workspace_dir],
-                permission_level=PermissionLevel.external_publish,
-                equipped_skills=["daily-reporter", "task-tracker", "feishu-publisher"],
-            ),
-            AgentDefinition(
-                id="agent_scheduler",
-                name="scheduler",
-                display_name="Scheduler Agent",
-                description="管理提醒、周期任务和 Workflow 定时触发。",
-                workspace_dir=workspace_dir,
-                allowed_paths=[workspace_dir],
-                permission_level=PermissionLevel.write,
-                equipped_skills=["reminder", "cron-master", "schedule-auditor"],
-            ),
-        ]
-        self._agents = {agent.name: agent for agent in agents}
+            )
+
+    # ── Public API ──────────────────────────────────────────────────────
 
     def list(self) -> list[AgentDefinition]:
         return list(self._agents.values())

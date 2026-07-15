@@ -1,0 +1,11 @@
+id: agent_scheduler
+name: scheduler
+display_name: Scheduler Agent
+description: 管理提醒、周期任务和 Workflow 定时触发。
+enabled: true
+default_model: deepseek-chat
+permission_level: write
+equipped_skills:
+  - reminder
+  - cron-master
+  - schedule-auditor

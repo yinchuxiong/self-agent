@@ -77,9 +77,9 @@ def test_routable_agent_names_come_from_registry() -> None:
     registry = AgentRegistry("E:/selfAgent")
     supervisor = FakeSupervisor(registry)
 
-    assert supervisor._routable_agent_names() == (
+    assert set(supervisor._routable_agent_names()) == {
         "programming",
         "personal_tools",
         "work",
         "scheduler",
-    )
+    }

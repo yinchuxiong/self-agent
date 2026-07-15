@@ -1,10 +1,9 @@
-"""Tool implementations and executor for Programming Agent.
+"""Tool infrastructure: executor, spec, and result types.
 
-Each tool is an async Python function registered in the ToolExecutor.
-Tools are the L4 atomic layer — single responsibility, stateless, input → output.
+Actual tool implementations live under .agents/{name}/tools/ — each module
+exports a register(executor) function.
 """
 
-from self_agent.app.tools.base import ToolExecutor
-from self_agent.app.tools.git_tools import register_git_tools
+from self_agent.app.tools.base import ToolExecutor, ToolResult, ToolSpec
 
-__all__ = ["ToolExecutor", "register_git_tools"]
+__all__ = ["ToolExecutor", "ToolResult", "ToolSpec"]

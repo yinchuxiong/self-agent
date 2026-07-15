@@ -1,0 +1,13 @@
+id: skill_format_shifter
+name: format-shifter
+display_name: 格式转换
+description: 在 Markdown、CSV、JSON、文本等格式之间转换。
+category: tools
+version: "0.1.0"
+enabled: true
+triggers:
+  - 转换
+  - 导出
+  - 格式
+permission_level: write
+confirm_required: false

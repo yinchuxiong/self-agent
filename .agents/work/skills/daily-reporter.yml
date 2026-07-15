@@ -1,0 +1,13 @@
+id: skill_daily_reporter
+name: daily-reporter
+display_name: 日报生成
+description: 汇总输入、提交记录和任务进展，生成日报草稿。
+category: work
+version: "0.1.0"
+enabled: true
+triggers:
+  - 日报
+  - 周报
+  - 总结
+permission_level: read
+confirm_required: false
